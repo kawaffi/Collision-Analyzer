@@ -103,3 +103,37 @@ func TestAddCountsValueInMatchingBin(t *testing.T) {
 		})
 	}
 }
+
+func TestAddOutOfRange(t *testing.T) {
+	tests := []struct {
+		name          string
+		value         float64
+		wantUnderflow uint64
+		wantOverflow  uint64
+	}{
+		{"below lo", -5, 1, 0},
+		{"equal to hi", 100, 0, 1},
+		{"above hi", 150, 0, 1},
+		{"just below lo", math.Nextafter(0, -1), 1, 0},
+		{"negative infinity", math.Inf(-1), 1, 0},
+		{"positive infinity", math.Inf(1), 0, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := mustNew(t, 0, 100, 10)
+
+			h.Add(tt.value)
+
+			if got := h.Underflow(); got != tt.wantUnderflow {
+				t.Errorf("Underflow() = %d, want %d", got, tt.wantUnderflow)
+			}
+			if got := h.Overflow(); got != tt.wantOverflow {
+				t.Errorf("Overflow() = %d, want %d", got, tt.wantOverflow)
+			}
+			if got := h.Counts(); !slices.Equal(got, make([]uint64, 10)) {
+				t.Errorf("out-of-range value changed the bins: Counts() = %v", got)
+			}
+		})
+	}
+}

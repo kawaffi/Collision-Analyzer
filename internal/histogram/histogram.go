@@ -7,8 +7,10 @@ import (
 )
 
 type Histogram struct {
-	lo, hi float64
-	counts []uint64
+	lo, hi    float64
+	counts    []uint64
+	underflow uint64
+	overflow  uint64
 }
 
 func New(lo, hi float64, numBins int) (*Histogram, error) {
@@ -31,6 +33,14 @@ func (h *Histogram) Counts() []uint64 {
 }
 
 func (h *Histogram) Add(v float64) {
+	if v < h.lo {
+		h.underflow++
+		return
+	}
+	if v >= h.hi {
+		h.overflow++
+		return
+	}
 	n := float64(len(h.counts))
 	i := int((v - h.lo) * n / (h.hi - h.lo))
 	h.counts[i]++
@@ -39,3 +49,7 @@ func (h *Histogram) Add(v float64) {
 func isFinite(x float64) bool {
 	return !math.IsNaN(x) && !math.IsInf(x, 0)
 }
+
+func (h *Histogram) Underflow() uint64 { return h.underflow }
+
+func (h *Histogram) Overflow() uint64 { return h.overflow }
