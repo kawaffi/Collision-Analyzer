@@ -55,6 +55,16 @@ func (h *Histogram) Add(v float64) {
 	h.counts[i]++
 }
 
+func (h *Histogram) Merge(other *Histogram) error {
+	for i, c := range other.counts {
+		h.counts[i] += c
+	}
+	h.underflow += other.underflow
+	h.overflow += other.overflow
+	h.invalid += other.invalid
+	return nil
+}
+
 func (h *Histogram) Invalid() uint64 { return h.invalid }
 
 func isFinite(x float64) bool {

@@ -173,3 +173,67 @@ func TestAddNaNIsCountedSeparately(t *testing.T) {
 		t.Errorf("NaN changed the bins: Counts() = %v", got)
 	}
 }
+
+func TestMergeSumsBins(t *testing.T) {
+	a := mustNew(t, 0, 100, 10)
+	b := mustNew(t, 0, 100, 10)
+	a.Add(5)
+	a.Add(55)
+	b.Add(5)
+	b.Add(95)
+
+	if err := a.Merge(b); err != nil {
+		t.Fatalf("Merge() returned error: %v", err)
+	}
+
+	want := []uint64{2, 0, 0, 0, 0, 1, 0, 0, 0, 1}
+	if got := a.Counts(); !slices.Equal(got, want) {
+		t.Errorf("Counts() = %v, want %v", got, want)
+	}
+}
+
+func TestMergeSumsCounters(t *testing.T) {
+	a := mustNew(t, 0, 100, 10)
+	b := mustNew(t, 0, 100, 10)
+
+	a.Add(-1)
+	a.Add(150)
+	a.Add(math.NaN())
+
+	b.Add(-1)
+	b.Add(-2)
+	b.Add(200)
+	b.Add(math.NaN())
+
+	if err := a.Merge(b); err != nil {
+		t.Fatalf("Merge() returned error: %v", err)
+	}
+
+	if got := a.Underflow(); got != 3 {
+		t.Errorf("Underflow() = %d, want 3", got)
+	}
+	if got := a.Overflow(); got != 2 {
+		t.Errorf("Overflow() = %d, want 2", got)
+	}
+	if got := a.Invalid(); got != 2 {
+		t.Errorf("Invalid() = %d, want 2", got)
+	}
+}
+
+func TestMergeDoesNotModifyOther(t *testing.T) {
+	a := mustNew(t, 0, 100, 10)
+	b := mustNew(t, 0, 100, 10)
+	b.Add(5)
+	b.Add(-1)
+
+	if err := a.Merge(b); err != nil {
+		t.Fatalf("Merge() returned error: %v", err)
+	}
+
+	if got := b.Counts()[0]; got != 1 {
+		t.Errorf("other.Counts()[0] = %d, want 1", got)
+	}
+	if got := b.Underflow(); got != 1 {
+		t.Errorf("other.Underflow() = %d, want 1", got)
+	}
+}
