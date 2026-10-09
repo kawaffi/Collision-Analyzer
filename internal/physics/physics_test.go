@@ -37,12 +37,18 @@ func TestInvariantMass(t *testing.T) {
 			b:    Muon{E: 5, Py: 4},
 			want: math.Sqrt(75),
 		},
+		{
+			name: "slightly negative squared mass from rounding",
+			a:    Muon{E: 5, Pz: 5},
+			b:    Muon{E: 5, Pz: 5 + 1e-12},
+			want: 0,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := InvariantMass(tt.a, tt.b)
-			if math.Abs(got-tt.want) > tolerance {
+			if math.IsNaN(got) || math.Abs(got-tt.want) > tolerance {
 				t.Errorf("InvariantMass() = %v, want %v", got, tt.want)
 			}
 		})
