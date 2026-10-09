@@ -54,3 +54,12 @@ func TestInvariantMass(t *testing.T) {
 		})
 	}
 }
+
+func TestInvariantMassIsSymmetric(t *testing.T) {
+	a := Muon{E: 12.5, Px: 3.1, Py: -4.2, Pz: 10.7}
+	b := Muon{E: 8.3, Px: -1.5, Py: 2.2, Pz: -6.9}
+
+	if got, want := InvariantMass(a, b), InvariantMass(b, a); got != want {
+		t.Errorf("InvariantMass(a, b) = %v, InvariantMass(b, a) = %v", got, want)
+	}
+}
