@@ -11,6 +11,7 @@ type Histogram struct {
 	counts    []uint64
 	underflow uint64
 	overflow  uint64
+	invalid   uint64
 }
 
 func New(lo, hi float64, numBins int) (*Histogram, error) {
@@ -33,6 +34,10 @@ func (h *Histogram) Counts() []uint64 {
 }
 
 func (h *Histogram) Add(v float64) {
+	if math.IsNaN(v) {
+		h.invalid++
+		return
+	}
 	if v < h.lo {
 		h.underflow++
 		return
@@ -49,6 +54,8 @@ func (h *Histogram) Add(v float64) {
 	}
 	h.counts[i]++
 }
+
+func (h *Histogram) Invalid() uint64 { return h.invalid }
 
 func isFinite(x float64) bool {
 	return !math.IsNaN(x) && !math.IsInf(x, 0)

@@ -156,3 +156,20 @@ func TestAddJustBelowHiStaysInLastBin(t *testing.T) {
 		}
 	}
 }
+
+func TestAddNaNIsCountedSeparately(t *testing.T) {
+	h := mustNew(t, 0, 100, 10)
+
+	h.Add(math.NaN())
+	h.Add(math.NaN())
+
+	if got := h.Invalid(); got != 2 {
+		t.Errorf("Invalid() = %d, want 2", got)
+	}
+	if h.Underflow() != 0 || h.Overflow() != 0 {
+		t.Errorf("NaN counted as out of range: underflow = %d, overflow = %d", h.Underflow(), h.Overflow())
+	}
+	if got := h.Counts(); !slices.Equal(got, make([]uint64, 10)) {
+		t.Errorf("NaN changed the bins: Counts() = %v", got)
+	}
+}
