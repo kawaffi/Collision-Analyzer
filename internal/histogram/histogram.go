@@ -73,6 +73,16 @@ func (h *Histogram) Merge(other *Histogram) error {
 	return nil
 }
 
+func (h *Histogram) BinEdges() []float64 {
+	n := len(h.counts)
+	edges := make([]float64, n+1)
+	for i := range edges {
+		edges[i] = h.lo + float64(i)*(h.hi-h.lo)/float64(n)
+	}
+	edges[n] = h.hi
+	return edges
+}
+
 func (h *Histogram) Invalid() uint64 { return h.invalid }
 
 func isFinite(x float64) bool {

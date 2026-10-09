@@ -354,3 +354,46 @@ func TestMergeOfSplitDataEqualsAddingAll(t *testing.T) {
 		assertSame(t, merged, all)
 	}
 }
+
+func TestBinEdges(t *testing.T) {
+	tests := []struct {
+		name    string
+		lo, hi  float64
+		numBins int
+		want    []float64
+	}{
+		{"ten bins", 0, 100, 10, []float64{0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100}},
+		{"negative lo", -1, 1, 4, []float64{-1, -0.5, 0, 0.5, 1}},
+		{"single bin", 0, 5, 1, []float64{0, 5}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := mustNew(t, tt.lo, tt.hi, tt.numBins)
+
+			if got := h.BinEdges(); !slices.Equal(got, tt.want) {
+				t.Errorf("BinEdges() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBinEdgesEndpointsAreExact(t *testing.T) {
+	for _, lo := range []float64{-1, 0, 0.1, 1, 1000} {
+		for _, width := range []float64{0.3, 1, 7, 100} {
+			hi := lo + width
+
+			for numBins := 1; numBins <= 50; numBins++ {
+				edges := mustNew(t, lo, hi, numBins).BinEdges()
+
+				if len(edges) != numBins+1 {
+					t.Fatalf("lo=%v hi=%v numBins=%d: len(edges) = %d, want %d", lo, hi, numBins, len(edges), numBins+1)
+				}
+				if edges[0] != lo || edges[numBins] != hi {
+					t.Errorf("lo=%v hi=%v numBins=%d: edges ends at [%v, %v], want [%v, %v]",
+						lo, hi, numBins, edges[0], edges[numBins], lo, hi)
+				}
+			}
+		}
+	}
+}
