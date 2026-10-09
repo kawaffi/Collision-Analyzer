@@ -19,6 +19,24 @@ func TestInvariantMass(t *testing.T) {
 			b:    Muon{E: 5, Px: 0, Py: 0, Pz: -5},
 			want: 10,
 		},
+		{
+			name: "two massive particles at rest",
+			a:    Muon{E: 3},
+			b:    Muon{E: 3},
+			want: 6,
+		},
+		{
+			name: "two massless particles in the same direction",
+			a:    Muon{E: 5, Pz: 5},
+			b:    Muon{E: 5, Pz: 5},
+			want: 0,
+		},
+		{
+			name: "momenta on different axes",
+			a:    Muon{E: 5, Px: 3},
+			b:    Muon{E: 5, Py: 4},
+			want: math.Sqrt(75),
+		},
 	}
 
 	for _, tt := range tests {
