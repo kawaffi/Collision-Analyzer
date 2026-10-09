@@ -397,3 +397,24 @@ func TestBinEdgesEndpointsAreExact(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeRequiresExactlyEqualRanges(t *testing.T) {
+	tests := []struct {
+		name   string
+		lo, hi float64
+	}{
+		{"lo differs by one ulp", math.Nextafter(0, 1), 100},
+		{"hi differs by one ulp", 0, math.Nextafter(100, 101)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := mustNew(t, 0, 100, 10)
+			b := mustNew(t, tt.lo, tt.hi, 10)
+
+			if err := a.Merge(b); err == nil {
+				t.Error("Merge() accepted a range that differs by one ulp, want an error")
+			}
+		})
+	}
+}
