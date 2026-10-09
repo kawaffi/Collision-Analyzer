@@ -56,6 +56,14 @@ func (h *Histogram) Add(v float64) {
 }
 
 func (h *Histogram) Merge(other *Histogram) error {
+	if other == nil {
+		return fmt.Errorf("histogram: cannot merge with nil histogram")
+	}
+	if len(h.counts) != len(other.counts) || h.lo != other.lo || h.hi != other.hi {
+		return fmt.Errorf("histogram: cannot merge different configurations: [%v, %v) with %d bins and [%v, %v) with %d bins",
+			h.lo, h.hi, len(h.counts), other.lo, other.hi, len(other.counts))
+	}
+
 	for i, c := range other.counts {
 		h.counts[i] += c
 	}

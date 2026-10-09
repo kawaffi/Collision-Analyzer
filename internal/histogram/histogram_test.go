@@ -237,3 +237,46 @@ func TestMergeDoesNotModifyOther(t *testing.T) {
 		t.Errorf("other.Underflow() = %d, want 1", got)
 	}
 }
+
+func TestMergeRejectsIncompatibleHistograms(t *testing.T) {
+	tests := []struct {
+		name    string
+		lo, hi  float64
+		numBins int
+	}{
+		{"different number of bins", 0, 100, 20},
+		{"different lo", 10, 100, 10},
+		{"different hi", 0, 200, 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := mustNew(t, 0, 100, 10)
+			a.Add(5)
+			a.Add(-1)
+			b := mustNew(t, tt.lo, tt.hi, tt.numBins)
+			b.Add(50)
+
+			if err := a.Merge(b); err == nil {
+				t.Fatal("Merge() returned nil error, want an error")
+			}
+
+			want := make([]uint64, 10)
+			want[0] = 1
+			if got := a.Counts(); !slices.Equal(got, want) {
+				t.Errorf("receiver modified by failed Merge: Counts() = %v, want %v", got, want)
+			}
+			if got := a.Underflow(); got != 1 {
+				t.Errorf("receiver modified by failed Merge: Underflow() = %d, want 1", got)
+			}
+		})
+	}
+}
+
+func TestMergeRejectsNil(t *testing.T) {
+	h := mustNew(t, 0, 100, 10)
+
+	if err := h.Merge(nil); err == nil {
+		t.Error("Merge(nil) returned nil error, want an error")
+	}
+}
