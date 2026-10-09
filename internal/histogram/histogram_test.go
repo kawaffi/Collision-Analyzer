@@ -2,6 +2,7 @@ package histogram
 
 import (
 	"math"
+	"math/rand/v2"
 	"slices"
 	"testing"
 )
@@ -278,5 +279,78 @@ func TestMergeRejectsNil(t *testing.T) {
 
 	if err := h.Merge(nil); err == nil {
 		t.Error("Merge(nil) returned nil error, want an error")
+	}
+}
+
+func randomValue(r *rand.Rand, lo, hi float64, numBins int) float64 {
+	width := hi - lo
+
+	switch r.IntN(10) {
+	case 0:
+		return math.NaN()
+	case 1:
+		return math.Inf(1)
+	case 2:
+		return math.Inf(-1)
+	case 3:
+		return lo // lower edge
+	case 4:
+		return hi // upper edge, counts as overflow
+	case 5:
+		k := r.IntN(numBins + 1)
+		return lo + float64(k)*width/float64(numBins) // exact bin boundaries
+	default:
+		return lo - 0.2*width + r.Float64()*1.4*width // mostly in range, some under and over
+	}
+}
+
+func assertSame(t *testing.T, got, want *Histogram) {
+	t.Helper()
+
+	if !slices.Equal(got.Counts(), want.Counts()) {
+		t.Errorf("Counts() = %v, want %v", got.Counts(), want.Counts())
+	}
+	if got.Underflow() != want.Underflow() {
+		t.Errorf("Underflow() = %d, want %d", got.Underflow(), want.Underflow())
+	}
+	if got.Overflow() != want.Overflow() {
+		t.Errorf("Overflow() = %d, want %d", got.Overflow(), want.Overflow())
+	}
+	if got.Invalid() != want.Invalid() {
+		t.Errorf("Invalid() = %d, want %d", got.Invalid(), want.Invalid())
+	}
+}
+
+func TestMergeOfSplitDataEqualsAddingAll(t *testing.T) {
+	const (
+		lo      = 0.0
+		hi      = 100.0
+		numBins = 10
+	)
+	r := rand.New(rand.NewPCG(1, 2))
+
+	for trial := 0; trial < 100; trial++ {
+		numParts := 1 + r.IntN(8)
+		all := mustNew(t, lo, hi, numBins)
+		parts := make([]*Histogram, numParts)
+		for i := range parts {
+			parts[i] = mustNew(t, lo, hi, numBins)
+		}
+
+		for n := 0; n < 1000; n++ {
+			v := randomValue(r, lo, hi, numBins)
+			all.Add(v)
+			parts[r.IntN(numParts)].Add(v)
+		}
+
+		merged := mustNew(t, lo, hi, numBins)
+		for _, p := range parts {
+			if err := merged.Merge(p); err != nil {
+				t.Fatalf("trial %d: Merge() returned error: %v", trial, err)
+			}
+		}
+
+		t.Logf("trial %d: %d parts", trial, numParts)
+		assertSame(t, merged, all)
 	}
 }
