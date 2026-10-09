@@ -7,6 +7,7 @@ import (
 )
 
 type Histogram struct {
+	lo, hi float64
 	counts []uint64
 }
 
@@ -22,11 +23,17 @@ func New(lo, hi float64, numBins int) (*Histogram, error) {
 		return nil, fmt.Errorf("histogram: lo must be less than hi, got [%v, %v)", lo, hi)
 	}
 
-	return &Histogram{counts: make([]uint64, numBins)}, nil
+	return &Histogram{lo: lo, hi: hi, counts: make([]uint64, numBins)}, nil
 }
 
 func (h *Histogram) Counts() []uint64 {
 	return slices.Clone(h.counts)
+}
+
+func (h *Histogram) Add(v float64) {
+	n := float64(len(h.counts))
+	i := int((v - h.lo) * n / (h.hi - h.lo))
+	h.counts[i]++
 }
 
 func isFinite(x float64) bool {
