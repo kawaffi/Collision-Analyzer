@@ -43,6 +43,10 @@ func (h *Histogram) Add(v float64) {
 	}
 	n := float64(len(h.counts))
 	i := int((v - h.lo) * n / (h.hi - h.lo))
+
+	if i >= len(h.counts) {
+		i = len(h.counts) - 1
+	}
 	h.counts[i]++
 }
 

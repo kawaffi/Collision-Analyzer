@@ -137,3 +137,22 @@ func TestAddOutOfRange(t *testing.T) {
 		})
 	}
 }
+
+func TestAddJustBelowHiStaysInLastBin(t *testing.T) {
+	for _, lo := range []float64{-1, 0, 0.1, 1, 1000} {
+		for _, width := range []float64{0.3, 1, 7, 100} {
+			hi := lo + width
+
+			for numBins := 1; numBins <= 50; numBins++ {
+				h := mustNew(t, lo, hi, numBins)
+
+				h.Add(math.Nextafter(hi, math.Inf(-1)))
+
+				if got := h.Counts()[numBins-1]; got != 1 || h.Overflow() != 0 {
+					t.Errorf("lo=%v hi=%v numBins=%d: last bin = %d, overflow = %d, want 1 and 0",
+						lo, hi, numBins, got, h.Overflow())
+				}
+			}
+		}
+	}
+}
