@@ -3,9 +3,12 @@ package histogram
 import (
 	"fmt"
 	"math"
+	"slices"
 )
 
-type Histogram struct{}
+type Histogram struct {
+	counts []uint64
+}
 
 func New(lo, hi float64, numBins int) (*Histogram, error) {
 	if numBins <= 0 {
@@ -19,7 +22,11 @@ func New(lo, hi float64, numBins int) (*Histogram, error) {
 		return nil, fmt.Errorf("histogram: lo must be less than hi, got [%v, %v)", lo, hi)
 	}
 
-	return &Histogram{}, nil
+	return &Histogram{counts: make([]uint64, numBins)}, nil
+}
+
+func (h *Histogram) Counts() []uint64 {
+	return slices.Clone(h.counts)
 }
 
 func isFinite(x float64) bool {
