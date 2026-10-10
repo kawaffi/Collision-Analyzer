@@ -3,6 +3,9 @@ package ingest
 import (
 	"errors"
 	"io"
+	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -172,4 +175,48 @@ func TestReadPropagatesIOErrors(t *testing.T) {
 	if errors.Is(err, ErrMalformedRow) {
 		t.Error("an I/O error was reported as a malformed row")
 	}
+}
+
+func TestSampleFileMatchesPrecomputedMass(t *testing.T) {
+	const (
+		wantEvents = 20
+		tolerance  = 5e-3
+	)
+
+	f, err := os.Open(filepath.Join("..", "..", "testdata", "sample.csv"))
+	if err != nil {
+		t.Fatalf("opening sample file: %v", err)
+	}
+	defer f.Close()
+
+	r, err := NewReader(f)
+	if err != nil {
+		t.Fatalf("NewReader() returned error: %v", err)
+	}
+
+	var n int
+	var maxDiff float64
+	for {
+		ev, err := r.Read()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("event %d: Read() returned error: %v", n+1, err)
+		}
+		n++
+
+		got := physics.InvariantMass(ev.Mu1, ev.Mu2)
+		diff := math.Abs(got - ev.PrecomputedMass)
+		maxDiff = math.Max(maxDiff, diff)
+		if diff > tolerance {
+			t.Errorf("event %d: InvariantMass() = %v, dataset M = %v (difference %.2e)",
+				n, got, ev.PrecomputedMass, diff)
+		}
+	}
+
+	if n != wantEvents {
+		t.Errorf("read %d events, want %d", n, wantEvents)
+	}
+	t.Logf("largest difference over %d events: %.2e", n, maxDiff)
 }
