@@ -22,14 +22,24 @@ type Event struct {
 }
 
 type Reader struct {
-	csv  *csv.Reader
-	cols columns
+	csv    *csv.Reader
+	parser Parser
 }
 
 type columns struct {
 	e1, px1, py1, pz1 int
 	e2, px2, py2, pz2 int
 	mass              int
+}
+
+type Record struct {
+	Line   int
+	Fields []string
+}
+
+type Parser struct {
+	cols      columns
+	numFields int
 }
 
 func NewReader(r io.Reader) (*Reader, error) {
@@ -39,12 +49,11 @@ func NewReader(r io.Reader) (*Reader, error) {
 		return nil, fmt.Errorf("ingest: reading header: %w", err)
 	}
 
-	cols, err := locateColumns(header)
+	p, err := NewParser(header)
 	if err != nil {
 		return nil, err
 	}
-
-	return &Reader{csv: cr, cols: cols}, nil
+	return &Reader{csv: cr, parser: p}, nil
 }
 
 func (r *Reader) Read() (Event, error) {
@@ -58,17 +67,34 @@ func (r *Reader) Read() (Event, error) {
 	}
 
 	line, _ := r.csv.FieldPos(0)
+	return r.parser.Parse(Record{Line: line, Fields: rec})
+}
+
+func NewParser(header []string) (Parser, error) {
+	cols, err := locateColumns(header)
+	if err != nil {
+		return Parser{}, err
+	}
+	return Parser{cols: cols, numFields: len(header)}, nil
+}
+
+func (p Parser) Parse(rec Record) (Event, error) {
+	if len(rec.Fields) != p.numFields {
+		return Event{}, fmt.Errorf("%w: line %d: got %d fields, want %d",
+			ErrMalformedRow, rec.Line, len(rec.Fields), p.numFields)
+	}
+
 	var rowErr error
 	f := func(name string, i int) float64 {
-		v, err := strconv.ParseFloat(rec[i], 64)
+		v, err := strconv.ParseFloat(rec.Fields[i], 64)
 		if (err != nil || !isFinite(v)) && rowErr == nil {
 			rowErr = fmt.Errorf("%w: line %d, column %s: %q is not a finite number",
-				ErrMalformedRow, line, name, rec[i])
+				ErrMalformedRow, rec.Line, name, rec.Fields[i])
 		}
 		return v
 	}
 
-	c := r.cols
+	c := p.cols
 	ev := Event{
 		Mu1:             physics.Muon{E: f("E1", c.e1), Px: f("px1", c.px1), Py: f("py1", c.py1), Pz: f("pz1", c.pz1)},
 		Mu2:             physics.Muon{E: f("E2", c.e2), Px: f("px2", c.px2), Py: f("py2", c.py2), Pz: f("pz2", c.pz2)},

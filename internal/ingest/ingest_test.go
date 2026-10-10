@@ -220,3 +220,59 @@ func TestSampleFileMatchesPrecomputedMass(t *testing.T) {
 	}
 	t.Logf("largest difference over %d events: %.2e", n, maxDiff)
 }
+
+func splitCSV(s string) []string {
+	return strings.Split(strings.TrimSuffix(s, "\n"), ",")
+}
+
+func newTestParser(t *testing.T) Parser {
+	t.Helper()
+
+	p, err := NewParser(splitCSV(header))
+	if err != nil {
+		t.Fatalf("NewParser() returned error: %v", err)
+	}
+	return p
+}
+
+func TestParseValidRecord(t *testing.T) {
+	p := newTestParser(t)
+
+	got, err := p.Parse(Record{Line: 2, Fields: splitCSV(row)})
+	if err != nil {
+		t.Fatalf("Parse() returned error: %v", err)
+	}
+	if got != firstEvent {
+		t.Errorf("Parse() = %+v, want %+v", got, firstEvent)
+	}
+}
+
+func TestParseRejectsMalformedRecords(t *testing.T) {
+	p := newTestParser(t)
+
+	tests := []struct {
+		name   string
+		fields []string
+	}{
+		{"non-numeric", splitCSV(strings.Replace(row, "19.1712", "abc", 1))},
+		{"NaN", splitCSV(strings.Replace(row, "19.1712", "NaN", 1))},
+		{"infinity", splitCSV(strings.Replace(row, "-16.4673", "+Inf", 1))},
+		{"empty field", splitCSV(strings.Replace(row, "2.73205", "", 1))},
+		{"too few fields", splitCSV(row)[:3]},
+		{"too many fields", append(splitCSV(row), "extra")},
+		{"no fields", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := p.Parse(Record{Line: 7, Fields: tt.fields})
+
+			if !errors.Is(err, ErrMalformedRow) {
+				t.Fatalf("Parse() error = %v, want ErrMalformedRow", err)
+			}
+			if !strings.Contains(err.Error(), "line 7") {
+				t.Errorf("error %q does not mention the line number", err)
+			}
+		})
+	}
+}
