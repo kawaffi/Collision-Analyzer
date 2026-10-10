@@ -114,6 +114,12 @@ func TestReadReportsMalformedRow(t *testing.T) {
 		{"empty mass", strings.Replace(row, "2.73205", "", 1)},
 		{"too few fields", "146436,90830792,G\n"},
 		{"too many fields", strings.TrimSuffix(row, "\n") + ",extra\n"},
+		{"NaN in E1", strings.Replace(row, "19.1712", "NaN", 1)},
+		{"NaN in the precomputed mass", strings.Replace(row, "2.73205", "NaN", 1)},
+		{"+Inf in pz1", strings.Replace(row, "-16.4673", "+Inf", 1)},
+		{"-Inf in E2", strings.Replace(row, "5.43984", "-Inf", 1)},
+		{"infinity spelled out", strings.Replace(row, "19.1712", "infinity", 1)},
+		{"out of range number", strings.Replace(row, "19.1712", "1e999", 1)},
 	}
 
 	for _, tt := range tests {

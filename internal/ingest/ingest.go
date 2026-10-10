@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 
@@ -60,8 +61,8 @@ func (r *Reader) Read() (Event, error) {
 	var rowErr error
 	f := func(name string, i int) float64 {
 		v, err := strconv.ParseFloat(rec[i], 64)
-		if err != nil && rowErr == nil {
-			rowErr = fmt.Errorf("%w: line %d, column %s: %q is not a number",
+		if (err != nil || !isFinite(v)) && rowErr == nil {
+			rowErr = fmt.Errorf("%w: line %d, column %s: %q is not a finite number",
 				ErrMalformedRow, line, name, rec[i])
 		}
 		return v
@@ -103,4 +104,8 @@ func locateColumns(header []string) (columns, error) {
 		return columns{}, fmt.Errorf("ingest: missing required columns: %s", strings.Join(missing, ", "))
 	}
 	return cols, nil
+}
+
+func isFinite(x float64) bool {
+	return !math.IsNaN(x) && !math.IsInf(x, 0)
 }
