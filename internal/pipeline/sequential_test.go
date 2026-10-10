@@ -3,6 +3,8 @@ package pipeline
 import (
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -127,5 +129,41 @@ func TestSequentialStopsOnReadError(t *testing.T) {
 	}
 	if want := (Stats{Processed: 1}); stats != want {
 		t.Errorf("Sequential() stats = %+v, want %+v", stats, want)
+	}
+}
+
+func TestSequentialOnSampleFile(t *testing.T) {
+	f, err := os.Open(filepath.Join("..", "..", "testdata", "sample.csv"))
+	if err != nil {
+		t.Fatalf("opening sample file: %v", err)
+	}
+	defer f.Close()
+
+	h := newHistogram(t)
+
+	stats, err := Sequential(f, h)
+	if err != nil {
+		t.Fatalf("Sequential() returned error: %v", err)
+	}
+
+	if want := (Stats{Processed: 20, Skipped: 0}); stats != want {
+		t.Errorf("Sequential() stats = %+v, want %+v", stats, want)
+	}
+
+	// Bins derived by hand from the M column of testdata/sample.csv.
+	want := make([]uint64, 20)
+	for bin, n := range map[int]uint64{
+		2: 2, 3: 2, 4: 1, 6: 1, 7: 2, 8: 3, 9: 2, 11: 2, 12: 1, 14: 1, 15: 1,
+	} {
+		want[bin] = n
+	}
+	if got := h.Counts(); !slices.Equal(got, want) {
+		t.Errorf("Counts() = %v, want %v", got, want)
+	}
+	if got := h.Overflow(); got != 2 {
+		t.Errorf("Overflow() = %d, want 2", got)
+	}
+	if h.Underflow() != 0 || h.Invalid() != 0 {
+		t.Errorf("Underflow() = %d, Invalid() = %d, want 0 and 0", h.Underflow(), h.Invalid())
 	}
 }
