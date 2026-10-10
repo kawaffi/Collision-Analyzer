@@ -71,3 +71,34 @@ func TestReadFindsColumnsByName(t *testing.T) {
 		t.Errorf("Read() = %+v, want %+v", got, firstEvent)
 	}
 }
+
+func TestNewReaderRejectsMissingColumns(t *testing.T) {
+	tests := []struct {
+		name        string
+		header      string
+		wantMissing []string
+	}{
+		{"missing M", "E1,px1,py1,pz1,E2,px2,py2,pz2\n", []string{"M"}},
+		{"missing E1 and px2", "py1,px1,pz1,E2,py2,pz2,M\n", []string{"E1", "px2"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewReader(strings.NewReader(tt.header))
+			if err == nil {
+				t.Fatal("NewReader() returned nil error, want an error")
+			}
+			for _, col := range tt.wantMissing {
+				if !strings.Contains(err.Error(), col) {
+					t.Errorf("error %q does not mention missing column %q", err, col)
+				}
+			}
+		})
+	}
+}
+
+func TestNewReaderRejectsEmptyInput(t *testing.T) {
+	if _, err := NewReader(strings.NewReader("")); err == nil {
+		t.Error("NewReader() accepted empty input, want an error")
+	}
+}

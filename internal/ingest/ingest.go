@@ -35,19 +35,12 @@ func NewReader(r io.Reader) (*Reader, error) {
 		return nil, fmt.Errorf("ingest: reading header: %w", err)
 	}
 
-	index := make(map[string]int, len(header))
-	for i, name := range header {
-		index[strings.TrimSpace(name)] = i
+	cols, err := locateColumns(header)
+	if err != nil {
+		return nil, err
 	}
 
-	return &Reader{
-		csv: cr,
-		cols: columns{
-			e1: index["E1"], px1: index["px1"], py1: index["py1"], pz1: index["pz1"],
-			e2: index["E2"], px2: index["px2"], py2: index["py2"], pz2: index["pz2"],
-			mass: index["M"],
-		},
-	}, nil
+	return &Reader{csv: cr, cols: cols}, nil
 }
 
 func (r *Reader) Read() (Event, error) {
@@ -67,4 +60,30 @@ func (r *Reader) Read() (Event, error) {
 		Mu2:             physics.Muon{E: f(c.e2), Px: f(c.px2), Py: f(c.py2), Pz: f(c.pz2)},
 		PrecomputedMass: f(c.mass),
 	}, nil
+}
+
+func locateColumns(header []string) (columns, error) {
+	index := make(map[string]int, len(header))
+	for i, name := range header {
+		index[strings.TrimSpace(name)] = i
+	}
+
+	var missing []string
+	find := func(name string) int {
+		i, ok := index[name]
+		if !ok {
+			missing = append(missing, name)
+		}
+		return i
+	}
+
+	cols := columns{
+		e1: find("E1"), px1: find("px1"), py1: find("py1"), pz1: find("pz1"),
+		e2: find("E2"), px2: find("px2"), py2: find("py2"), pz2: find("pz2"),
+		mass: find("M"),
+	}
+	if len(missing) > 0 {
+		return columns{}, fmt.Errorf("ingest: missing required columns: %s", strings.Join(missing, ", "))
+	}
+	return cols, nil
 }
