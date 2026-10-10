@@ -1,9 +1,12 @@
 package pipeline
 
 import (
+	"errors"
+	"io"
 	"slices"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/kawaffi/collision-analyzer/internal/histogram"
 )
@@ -109,5 +112,20 @@ func TestSequentialSkipsEveryKindOfBadRow(t *testing.T) {
 				t.Errorf("Sequential() stats = %+v, want %+v", stats, want)
 			}
 		})
+	}
+}
+
+func TestSequentialStopsOnReadError(t *testing.T) {
+	boom := errors.New("disk on fire")
+	h := newHistogram(t)
+	in := io.MultiReader(strings.NewReader(header+row1), iotest.ErrReader(boom))
+
+	stats, err := Sequential(in, h)
+
+	if !errors.Is(err, boom) {
+		t.Errorf("Sequential() error = %v, want %v", err, boom)
+	}
+	if want := (Stats{Processed: 1}); stats != want {
+		t.Errorf("Sequential() stats = %+v, want %+v", stats, want)
 	}
 }
