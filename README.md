@@ -31,3 +31,5 @@ A 20-event sample is in `testdata/`.
   tests compare against the value computed from the muon four-vectors.
 - `Processed` counts events added to the histogram (including under/overflow);
   `Skipped` counts rows that could not be parsed.
+- Sequential baseline: about 1.5M events/s (range 1.42-1.64M over 5 runs,
+  500,000 rows, Intel Core i7-1255U, `go test -bench Sequential`).
