@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/kawaffi/collision-analyzer/internal/physics"
 )
+
+var ErrMalformedRow = errors.New("malformed row")
 
 type Event struct {
 	Mu1, Mu2 physics.Muon
@@ -46,20 +49,34 @@ func NewReader(r io.Reader) (*Reader, error) {
 func (r *Reader) Read() (Event, error) {
 	rec, err := r.csv.Read()
 	if err != nil {
+		var parseErr *csv.ParseError
+		if errors.As(err, &parseErr) {
+			return Event{}, fmt.Errorf("%w: %w", ErrMalformedRow, err)
+		}
 		return Event{}, err
 	}
 
-	f := func(i int) float64 {
-		v, _ := strconv.ParseFloat(rec[i], 64)
+	line, _ := r.csv.FieldPos(0)
+	var rowErr error
+	f := func(name string, i int) float64 {
+		v, err := strconv.ParseFloat(rec[i], 64)
+		if err != nil && rowErr == nil {
+			rowErr = fmt.Errorf("%w: line %d, column %s: %q is not a number",
+				ErrMalformedRow, line, name, rec[i])
+		}
 		return v
 	}
 
 	c := r.cols
-	return Event{
-		Mu1:             physics.Muon{E: f(c.e1), Px: f(c.px1), Py: f(c.py1), Pz: f(c.pz1)},
-		Mu2:             physics.Muon{E: f(c.e2), Px: f(c.px2), Py: f(c.py2), Pz: f(c.pz2)},
-		PrecomputedMass: f(c.mass),
-	}, nil
+	ev := Event{
+		Mu1:             physics.Muon{E: f("E1", c.e1), Px: f("px1", c.px1), Py: f("py1", c.py1), Pz: f("pz1", c.pz1)},
+		Mu2:             physics.Muon{E: f("E2", c.e2), Px: f("px2", c.px2), Py: f("py2", c.py2), Pz: f("pz2", c.pz2)},
+		PrecomputedMass: f("M", c.mass),
+	}
+	if rowErr != nil {
+		return Event{}, rowErr
+	}
+	return ev, nil
 }
 
 func locateColumns(header []string) (columns, error) {

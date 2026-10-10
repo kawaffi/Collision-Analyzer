@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/kawaffi/collision-analyzer/internal/physics"
 )
@@ -100,5 +101,69 @@ func TestNewReaderRejectsMissingColumns(t *testing.T) {
 func TestNewReaderRejectsEmptyInput(t *testing.T) {
 	if _, err := NewReader(strings.NewReader("")); err == nil {
 		t.Error("NewReader() accepted empty input, want an error")
+	}
+}
+
+func TestReadReportsMalformedRow(t *testing.T) {
+	tests := []struct {
+		name string
+		row  string
+	}{
+		{"non-numeric E1", strings.Replace(row, "19.1712", "abc", 1)},
+		{"non-numeric px of second muon", strings.Replace(row, "-0.362592", "x", 1)},
+		{"empty mass", strings.Replace(row, "2.73205", "", 1)},
+		{"too few fields", "146436,90830792,G\n"},
+		{"too many fields", strings.TrimSuffix(row, "\n") + ",extra\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, err := NewReader(strings.NewReader(header + tt.row))
+			if err != nil {
+				t.Fatalf("NewReader() returned error: %v", err)
+			}
+
+			if _, err := r.Read(); !errors.Is(err, ErrMalformedRow) {
+				t.Errorf("Read() error = %v, want ErrMalformedRow", err)
+			}
+		})
+	}
+}
+
+func TestReadContinuesAfterMalformedRow(t *testing.T) {
+	bad := strings.Replace(row, "19.1712", "abc", 1)
+	r, err := NewReader(strings.NewReader(header + bad + row))
+	if err != nil {
+		t.Fatalf("NewReader() returned error: %v", err)
+	}
+
+	if _, err := r.Read(); !errors.Is(err, ErrMalformedRow) {
+		t.Fatalf("first Read() error = %v, want ErrMalformedRow", err)
+	}
+	got, err := r.Read()
+	if err != nil {
+		t.Fatalf("second Read() returned error: %v", err)
+	}
+	if got != firstEvent {
+		t.Errorf("second Read() = %+v, want %+v", got, firstEvent)
+	}
+	if _, err := r.Read(); !errors.Is(err, io.EOF) {
+		t.Errorf("third Read() error = %v, want io.EOF", err)
+	}
+}
+
+func TestReadPropagatesIOErrors(t *testing.T) {
+	boom := errors.New("disk on fire")
+	r, err := NewReader(io.MultiReader(strings.NewReader(header), iotest.ErrReader(boom)))
+	if err != nil {
+		t.Fatalf("NewReader() returned error: %v", err)
+	}
+
+	_, err = r.Read()
+	if !errors.Is(err, boom) {
+		t.Errorf("Read() error = %v, want %v", err, boom)
+	}
+	if errors.Is(err, ErrMalformedRow) {
+		t.Error("an I/O error was reported as a malformed row")
 	}
 }
