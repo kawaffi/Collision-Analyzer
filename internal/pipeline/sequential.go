@@ -26,6 +26,10 @@ func Sequential(r io.Reader, h *histogram.Histogram) (Stats, error) {
 		if errors.Is(err, io.EOF) {
 			return stats, nil
 		}
+		if errors.Is(err, ingest.ErrMalformedRow) {
+			stats.Skipped++
+			continue
+		}
 		if err != nil {
 			return stats, err
 		}

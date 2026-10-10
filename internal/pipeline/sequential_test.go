@@ -44,3 +44,70 @@ func TestSequentialProcessesValidEvents(t *testing.T) {
 		t.Errorf("Counts() = %v, want %v", got, want)
 	}
 }
+
+var badRow = strings.Replace(row1, "19.1712", "abc", 1)
+
+func TestSequentialSkipsMalformedRows(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantStats Stats
+		wantBins  []int
+	}{
+		{"in the middle", header + row1 + badRow + row2, Stats{Processed: 2, Skipped: 1}, []int{2, 3}},
+		{"first", header + badRow + row1 + row2, Stats{Processed: 2, Skipped: 1}, []int{2, 3}},
+		{"last", header + row1 + row2 + badRow, Stats{Processed: 2, Skipped: 1}, []int{2, 3}},
+		{"consecutive", header + badRow + badRow + row2, Stats{Processed: 1, Skipped: 2}, []int{3}},
+		{"only malformed", header + badRow, Stats{Processed: 0, Skipped: 1}, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHistogram(t)
+
+			stats, err := Sequential(strings.NewReader(tt.input), h)
+			if err != nil {
+				t.Fatalf("Sequential() returned error: %v", err)
+			}
+			if stats != tt.wantStats {
+				t.Errorf("Sequential() stats = %+v, want %+v", stats, tt.wantStats)
+			}
+
+			want := make([]uint64, 20)
+			for _, bin := range tt.wantBins {
+				want[bin]++
+			}
+			if got := h.Counts(); !slices.Equal(got, want) {
+				t.Errorf("Counts() = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestSequentialSkipsEveryKindOfBadRow(t *testing.T) {
+	tests := []struct {
+		name string
+		row  string
+	}{
+		{"non-numeric field", strings.Replace(row1, "19.1712", "abc", 1)},
+		{"NaN", strings.Replace(row1, "19.1712", "NaN", 1)},
+		{"infinity", strings.Replace(row1, "-16.4673", "+Inf", 1)},
+		{"empty field", strings.Replace(row1, "2.73205", "", 1)},
+		{"too few fields", "146436,90830792,G\n"},
+		{"too many fields", strings.TrimSuffix(row1, "\n") + ",extra\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHistogram(t)
+
+			stats, err := Sequential(strings.NewReader(header+row2+tt.row+row3), h)
+			if err != nil {
+				t.Fatalf("Sequential() returned error: %v", err)
+			}
+			if want := (Stats{Processed: 2, Skipped: 1}); stats != want {
+				t.Errorf("Sequential() stats = %+v, want %+v", stats, want)
+			}
+		})
+	}
+}
