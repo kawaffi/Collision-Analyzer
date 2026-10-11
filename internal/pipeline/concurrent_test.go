@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -95,9 +96,7 @@ func TestConcurrentRejectsInvalidOptions(t *testing.T) {
 		name string
 		opts Options
 	}{
-		{"zero workers", Options{Workers: 0, BatchSize: 10}},
 		{"negative workers", Options{Workers: -1, BatchSize: 10}},
-		{"zero batch size", Options{Workers: 2, BatchSize: 0}},
 		{"negative batch size", Options{Workers: 2, BatchSize: -5}},
 	}
 
@@ -115,4 +114,56 @@ func TestConcurrentRejectsInvalidOptions(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOptionsWithDefaults(t *testing.T) {
+	cpus := runtime.GOMAXPROCS(0)
+
+	tests := []struct {
+		name    string
+		in      Options
+		want    Options
+		wantErr bool
+	}{
+		{"all zero", Options{}, Options{Workers: cpus, BatchSize: DefaultBatchSize}, false},
+		{"explicit values are kept", Options{Workers: 3, BatchSize: 10}, Options{Workers: 3, BatchSize: 10}, false},
+		{"only workers set", Options{Workers: 3}, Options{Workers: 3, BatchSize: DefaultBatchSize}, false},
+		{"only batch size set", Options{BatchSize: 10}, Options{Workers: cpus, BatchSize: 10}, false},
+		{"negative workers", Options{Workers: -1}, Options{}, true},
+		{"negative batch size", Options{BatchSize: -1}, Options{}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.in.withDefaults()
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("withDefaults() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("withDefaults() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConcurrentWithDefaultOptions(t *testing.T) {
+	data := readSample(t)
+
+	want := newHistogram(t)
+	wantStats, err := Sequential(bytes.NewReader(data), want)
+	if err != nil {
+		t.Fatalf("Sequential() returned error: %v", err)
+	}
+
+	got := newHistogram(t)
+	stats, err := Concurrent(context.Background(), bytes.NewReader(data), got, Options{})
+	if err != nil {
+		t.Fatalf("Concurrent() returned error: %v", err)
+	}
+
+	if stats != wantStats {
+		t.Errorf("Concurrent() stats = %+v, want %+v", stats, wantStats)
+	}
+	assertSameHistogram(t, got, want)
 }

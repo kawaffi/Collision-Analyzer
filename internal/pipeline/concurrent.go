@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 	"sync"
 
 	"github.com/kawaffi/collision-analyzer/internal/histogram"
@@ -22,10 +23,27 @@ type workerResult struct {
 	stats Stats
 }
 
+// DefaultBatchSize is the batch size used when Options.BatchSize is zero.
+const DefaultBatchSize = 5000
+
+func (o Options) withDefaults() (Options, error) {
+	if o.Workers < 0 || o.BatchSize < 0 {
+		return Options{}, fmt.Errorf("pipeline: Workers and BatchSize must not be negative, got %d and %d",
+			o.Workers, o.BatchSize)
+	}
+	if o.Workers == 0 {
+		o.Workers = runtime.GOMAXPROCS(0)
+	}
+	if o.BatchSize == 0 {
+		o.BatchSize = DefaultBatchSize
+	}
+	return o, nil
+}
+
 func Concurrent(ctx context.Context, r io.Reader, h *histogram.Histogram, opts Options) (Stats, error) {
-	if opts.Workers < 1 || opts.BatchSize < 1 {
-		return Stats{}, fmt.Errorf("pipeline: Workers and BatchSize must be positive, got %d and %d",
-			opts.Workers, opts.BatchSize)
+	opts, err := opts.withDefaults()
+	if err != nil {
+		return Stats{}, err
 	}
 
 	rd, err := ingest.NewReader(r)
