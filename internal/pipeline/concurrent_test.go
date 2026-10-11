@@ -167,3 +167,49 @@ func TestConcurrentWithDefaultOptions(t *testing.T) {
 	}
 	assertSameHistogram(t, got, want)
 }
+
+func TestConcurrentSkipsMalformedRows(t *testing.T) {
+	// Two families of bad rows. Wrong field counts are noticed by the reader
+	// (ReadRecord); unreadable numbers, NaN and Inf are noticed by the workers
+	// (Parse). Both must be skipped and counted, exactly as Sequential does.
+	var (
+		tooFew  = "146436,90830792,G\n"
+		tooMany = strings.TrimSuffix(row1, "\n") + ",extra\n"
+		badNum  = strings.Replace(row1, "19.1712", "abc", 1)
+		nanRow  = strings.Replace(row1, "19.1712", "NaN", 1)
+		infRow  = strings.Replace(row1, "-16.4673", "+Inf", 1)
+		emptyM  = strings.Replace(row1, "2.73205", "", 1)
+	)
+
+	input := header +
+		tooFew + row1 + badNum + row2 + nanRow + tooMany + row3 + row1 + infRow + emptyM + row2 + tooFew
+	const wantProcessed, wantSkipped = 5, 7
+
+	want := newHistogram(t)
+	wantStats, err := Sequential(strings.NewReader(input), want)
+	if err != nil {
+		t.Fatalf("Sequential() returned error: %v", err)
+	}
+	if wantStats != (Stats{Processed: wantProcessed, Skipped: wantSkipped}) {
+		t.Fatalf("Sequential() stats = %+v, test input is not what the test assumes", wantStats)
+	}
+
+	for _, workers := range []int{1, 2, 4, 8} {
+		for _, batchSize := range []int{1, 2, 3, 100} {
+			t.Run(fmt.Sprintf("workers=%d/batch=%d", workers, batchSize), func(t *testing.T) {
+				got := newHistogram(t)
+
+				stats, err := Concurrent(context.Background(), strings.NewReader(input), got,
+					Options{Workers: workers, BatchSize: batchSize})
+				if err != nil {
+					t.Fatalf("Concurrent() returned error: %v", err)
+				}
+
+				if stats != wantStats {
+					t.Errorf("Concurrent() stats = %+v, want %+v", stats, wantStats)
+				}
+				assertSameHistogram(t, got, want)
+			})
+		}
+	}
+}

@@ -79,12 +79,17 @@ func Concurrent(ctx context.Context, r io.Reader, h *histogram.Histogram, opts O
 		}()
 	}
 
+	var readerSkipped uint64
 	var readErr error
 	batch := make([]ingest.Record, 0, opts.BatchSize)
 	for {
 		rec, err := rd.ReadRecord()
 		if errors.Is(err, io.EOF) {
 			break
+		}
+		if errors.Is(err, ingest.ErrMalformedRow) {
+			readerSkipped++
+			continue
 		}
 		if err != nil {
 			readErr = err
@@ -103,7 +108,7 @@ func Concurrent(ctx context.Context, r io.Reader, h *histogram.Histogram, opts O
 	close(batches)
 	wg.Wait()
 
-	var total Stats
+	total := Stats{Skipped: readerSkipped}
 	for _, res := range results {
 		total.Processed += res.stats.Processed
 		total.Skipped += res.stats.Skipped
