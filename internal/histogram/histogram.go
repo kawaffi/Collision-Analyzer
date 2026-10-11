@@ -29,6 +29,17 @@ func New(lo, hi float64, numBins int) (*Histogram, error) {
 	return &Histogram{lo: lo, hi: hi, counts: make([]uint64, numBins)}, nil
 }
 
+// NewLike returns an empty histogram with the same configuration as h.
+//
+// It exists for concurrent processing: each worker fills its own histogram
+// (a Histogram is not safe for concurrent use) and the results are combined
+// with Merge, which requires identical configurations. Deriving the worker
+// histograms from h guarantees compatibility by construction, instead of
+// repeating lo, hi and the number of bins at every call site.
+func (h *Histogram) NewLike() *Histogram {
+	return &Histogram{lo: h.lo, hi: h.hi, counts: make([]uint64, len(h.counts))}
+}
+
 func (h *Histogram) Counts() []uint64 {
 	return slices.Clone(h.counts)
 }

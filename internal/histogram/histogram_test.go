@@ -418,3 +418,33 @@ func TestMergeRequiresExactlyEqualRanges(t *testing.T) {
 		})
 	}
 }
+
+func TestNewLikeCopiesConfigurationNotData(t *testing.T) {
+	h := mustNew(t, 2, 110, 54)
+	h.Add(5)
+	h.Add(-1)
+	h.Add(200)
+	h.Add(math.NaN())
+
+	l := h.NewLike()
+
+	if !slices.Equal(l.BinEdges(), h.BinEdges()) {
+		t.Errorf("NewLike() has different bin edges")
+	}
+	if !slices.Equal(l.Counts(), make([]uint64, 54)) {
+		t.Errorf("NewLike() is not empty: Counts() = %v", l.Counts())
+	}
+	if l.Underflow() != 0 || l.Overflow() != 0 || l.Invalid() != 0 {
+		t.Errorf("NewLike() has non-zero counters: %d, %d, %d", l.Underflow(), l.Overflow(), l.Invalid())
+	}
+
+	// The new histogram is independent from the original...
+	l.Add(5)
+	if got := h.Counts()[1]; got != 1 {
+		t.Errorf("adding to the copy changed the original: Counts()[1] = %d, want 1", got)
+	}
+	// ...and compatible with it.
+	if err := h.Merge(l); err != nil {
+		t.Errorf("Merge() of a NewLike() histogram returned error: %v", err)
+	}
+}
