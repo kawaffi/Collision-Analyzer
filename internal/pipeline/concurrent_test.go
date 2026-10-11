@@ -3,15 +3,19 @@ package pipeline
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/kawaffi/collision-analyzer/internal/histogram"
+	"github.com/kawaffi/collision-analyzer/internal/ingest"
 )
 
 func readSample(t *testing.T) []byte {
@@ -209,6 +213,36 @@ func TestConcurrentSkipsMalformedRows(t *testing.T) {
 					t.Errorf("Concurrent() stats = %+v, want %+v", stats, wantStats)
 				}
 				assertSameHistogram(t, got, want)
+			})
+		}
+	}
+}
+
+func TestConcurrentReturnsReadErrorWithoutMergingPartialResult(t *testing.T) {
+	boom := errors.New("disk on fire")
+	const validRows = 200
+	input := header + strings.Repeat(row1, validRows)
+
+	for _, workers := range []int{1, 4} {
+		for _, batchSize := range []int{1, 7, 5000} {
+			t.Run(fmt.Sprintf("workers=%d/batch=%d", workers, batchSize), func(t *testing.T) {
+				h := newHistogram(t)
+				in := io.MultiReader(strings.NewReader(input), iotest.ErrReader(boom))
+
+				stats, err := Concurrent(context.Background(), in, h,
+					Options{Workers: workers, BatchSize: batchSize})
+
+				if !errors.Is(err, boom) {
+					t.Errorf("Concurrent() error = %v, want %v", err, boom)
+				}
+				if errors.Is(err, ingest.ErrMalformedRow) {
+					t.Error("a read error was reported as a malformed row")
+				}
+				assertSameHistogram(t, h, newHistogram(t))
+
+				if stats.Processed > validRows || stats.Skipped != 0 {
+					t.Errorf("Concurrent() stats = %+v, want Processed <= %d and Skipped = 0", stats, validRows)
+				}
 			})
 		}
 	}
