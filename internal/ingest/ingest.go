@@ -57,17 +57,25 @@ func NewReader(r io.Reader) (*Reader, error) {
 }
 
 func (r *Reader) Read() (Event, error) {
-	rec, err := r.csv.Read()
+	rec, err := r.ReadRecord()
+	if err != nil {
+		return Event{}, err
+	}
+	return r.parser.Parse(rec)
+}
+
+func (r *Reader) ReadRecord() (Record, error) {
+	fields, err := r.csv.Read()
 	if err != nil {
 		var parseErr *csv.ParseError
 		if errors.As(err, &parseErr) {
-			return Event{}, fmt.Errorf("%w: %w", ErrMalformedRow, err)
+			return Record{}, fmt.Errorf("%w: %w", ErrMalformedRow, err)
 		}
-		return Event{}, err
+		return Record{}, err
 	}
 
 	line, _ := r.csv.FieldPos(0)
-	return r.parser.Parse(Record{Line: line, Fields: rec})
+	return Record{Line: line, Fields: fields}, nil
 }
 
 func NewParser(header []string) (Parser, error) {
@@ -76,6 +84,10 @@ func NewParser(header []string) (Parser, error) {
 		return Parser{}, err
 	}
 	return Parser{cols: cols, numFields: len(header)}, nil
+}
+
+func (r *Reader) Parser() Parser {
+	return r.parser
 }
 
 func (p Parser) Parse(rec Record) (Event, error) {

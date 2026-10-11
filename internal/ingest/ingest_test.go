@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+	"slices"
 
 	"github.com/kawaffi/collision-analyzer/internal/physics"
 )
@@ -274,5 +275,86 @@ func TestParseRejectsMalformedRecords(t *testing.T) {
 				t.Errorf("error %q does not mention the line number", err)
 			}
 		})
+	}
+}
+
+func TestReadRecordReturnsRawFieldsAndLineNumbers(t *testing.T) {
+	r, err := NewReader(strings.NewReader(header + row + row))
+	if err != nil {
+		t.Fatalf("NewReader() returned error: %v", err)
+	}
+
+	for wantLine := 2; wantLine <= 3; wantLine++ {
+		rec, err := r.ReadRecord()
+		if err != nil {
+			t.Fatalf("ReadRecord() for line %d returned error: %v", wantLine, err)
+		}
+		if rec.Line != wantLine {
+			t.Errorf("Line = %d, want %d", rec.Line, wantLine)
+		}
+		if want := splitCSV(row); !slices.Equal(rec.Fields, want) {
+			t.Errorf("Fields = %v, want %v", rec.Fields, want)
+		}
+	}
+
+	if _, err := r.ReadRecord(); !errors.Is(err, io.EOF) {
+		t.Errorf("ReadRecord() at the end: error = %v, want io.EOF", err)
+	}
+}
+
+func TestReadRecordReportsBadFieldCountAndContinues(t *testing.T) {
+	r, err := NewReader(strings.NewReader(header + "146436,90830792,G\n" + row))
+	if err != nil {
+		t.Fatalf("NewReader() returned error: %v", err)
+	}
+
+	if _, err := r.ReadRecord(); !errors.Is(err, ErrMalformedRow) {
+		t.Fatalf("first ReadRecord() error = %v, want ErrMalformedRow", err)
+	}
+	rec, err := r.ReadRecord()
+	if err != nil {
+		t.Fatalf("second ReadRecord() returned error: %v", err)
+	}
+	if rec.Line != 3 {
+		t.Errorf("Line = %d, want 3", rec.Line)
+	}
+}
+
+func TestReaderParserParsesItsOwnRecords(t *testing.T) {
+	r, err := NewReader(strings.NewReader(header + row))
+	if err != nil {
+		t.Fatalf("NewReader() returned error: %v", err)
+	}
+
+	rec, err := r.ReadRecord()
+	if err != nil {
+		t.Fatalf("ReadRecord() returned error: %v", err)
+	}
+	got, err := r.Parser().Parse(rec)
+	if err != nil {
+		t.Fatalf("Parse() returned error: %v", err)
+	}
+	if got != firstEvent {
+		t.Errorf("Parse() = %+v, want %+v", got, firstEvent)
+	}
+}
+
+func TestReadRecordDoesNotReuseMemory(t *testing.T) {
+	second := strings.Replace(row, "19.1712", "20.1712", 1)
+	r, err := NewReader(strings.NewReader(header + row + second))
+	if err != nil {
+		t.Fatalf("NewReader() returned error: %v", err)
+	}
+
+	first, err := r.ReadRecord()
+	if err != nil {
+		t.Fatalf("first ReadRecord() returned error: %v", err)
+	}
+	if _, err := r.ReadRecord(); err != nil {
+		t.Fatalf("second ReadRecord() returned error: %v", err)
+	}
+
+	if got := first.Fields[3]; got != "19.1712" {
+		t.Errorf("first record changed after reading the next one: E1 = %q, want %q", got, "19.1712")
 	}
 }
