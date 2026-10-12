@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"math"
 	"os"
+	"os/signal"
+	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/kawaffi/collision-analyzer/internal/histogram"
@@ -14,10 +18,22 @@ import (
 
 const barWidth = 50
 
+type config struct {
+	lo, hi     float64
+	bins       int
+	workers    int
+	batch      int
+	sequential bool
+}
+
 func main() {
-	lo := flag.Float64("lo", 2, "lower edge of the mass range (GeV)")
-	hi := flag.Float64("hi", 110, "upper edge of the mass range (GeV)")
-	bins := flag.Int("bins", 108, "number of bins")
+	var cfg config
+	flag.Float64Var(&cfg.lo, "lo", 2, "lower edge of the mass range (GeV)")
+	flag.Float64Var(&cfg.hi, "hi", 110, "upper edge of the mass range (GeV)")
+	flag.IntVar(&cfg.bins, "bins", 108, "number of bins")
+	flag.IntVar(&cfg.workers, "workers", 0, "number of workers (0 = all available threads)")
+	flag.IntVar(&cfg.batch, "batch", 0, fmt.Sprintf("rows per batch (0 = %d)", pipeline.DefaultBatchSize))
+	flag.BoolVar(&cfg.sequential, "sequential", false, "use the single-threaded pipeline (ignores -workers and -batch)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: analyze [flags] file.csv [file.csv ...]\n")
 		flag.PrintDefaults()
@@ -28,22 +44,41 @@ func main() {
 		flag.Usage()
 		os.Exit(2)
 	}
-	if err := run(flag.Args(), *lo, *hi, *bins); err != nil {
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+	err := run(ctx, flag.Args(), cfg)
+	stop()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run(files []string, lo, hi float64, bins int) error {
-	h, err := histogram.New(lo, hi, bins)
+func run(ctx context.Context, files []string, cfg config) error {
+	h, err := histogram.New(cfg.lo, cfg.hi, cfg.bins)
 	if err != nil {
 		return err
+	}
+
+	if cfg.workers == 0 {
+		cfg.workers = runtime.GOMAXPROCS(0)
+	}
+	if cfg.batch == 0 {
+		cfg.batch = pipeline.DefaultBatchSize
+	}
+	mode := fmt.Sprintf("concurrent, %d workers, batches of %d rows", cfg.workers, cfg.batch)
+	if cfg.sequential {
+		mode = "sequential"
 	}
 
 	var total pipeline.Stats
 	start := time.Now()
 	for _, name := range files {
-		stats, err := processFile(name, h)
+		stats, err := processFile(ctx, name, h, cfg)
 		if err != nil {
 			return fmt.Errorf("%s: %w", name, err)
 		}
@@ -52,11 +87,12 @@ func run(files []string, lo, hi float64, bins int) error {
 	}
 	elapsed := time.Since(start)
 
+	fmt.Printf("mode:        %s\n", mode)
 	fmt.Printf("files:       %d\n", len(files))
 	fmt.Printf("processed:   %d events\n", total.Processed)
 	fmt.Printf("skipped:     %d malformed rows\n", total.Skipped)
-	fmt.Printf("underflow:   %d (mass below %g)\n", h.Underflow(), lo)
-	fmt.Printf("overflow:    %d (mass at or above %g)\n", h.Overflow(), hi)
+	fmt.Printf("underflow:   %d (mass below %g)\n", h.Underflow(), cfg.lo)
+	fmt.Printf("overflow:    %d (mass at or above %g)\n", h.Overflow(), cfg.hi)
 	fmt.Printf("invalid:     %d (NaN)\n", h.Invalid())
 	fmt.Printf("elapsed:     %v\n", elapsed.Round(time.Millisecond))
 	fmt.Printf("throughput:  %.0f events/s\n\n", float64(total.Processed)/elapsed.Seconds())
@@ -65,14 +101,17 @@ func run(files []string, lo, hi float64, bins int) error {
 	return nil
 }
 
-func processFile(name string, h *histogram.Histogram) (pipeline.Stats, error) {
+func processFile(ctx context.Context, name string, h *histogram.Histogram, cfg config) (pipeline.Stats, error) {
 	f, err := os.Open(name)
 	if err != nil {
 		return pipeline.Stats{}, err
 	}
 	defer f.Close()
 
-	return pipeline.Sequential(f, h)
+	if cfg.sequential {
+		return pipeline.Sequential(f, h)
+	}
+	return pipeline.Concurrent(ctx, f, h, pipeline.Options{Workers: cfg.workers, BatchSize: cfg.batch})
 }
 
 // printHistogram draws one bar per bin, scaled logarithmically.
