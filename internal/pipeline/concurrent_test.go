@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+	"time"
 
 	"github.com/kawaffi/collision-analyzer/internal/histogram"
 	"github.com/kawaffi/collision-analyzer/internal/ingest"
@@ -243,6 +244,92 @@ func TestConcurrentReturnsReadErrorWithoutMergingPartialResult(t *testing.T) {
 				if stats.Processed > validRows || stats.Skipped != 0 {
 					t.Errorf("Concurrent() stats = %+v, want Processed <= %d and Skipped = 0", stats, validRows)
 				}
+			})
+		}
+	}
+}
+
+type repeatReader struct {
+	s   string
+	off int
+}
+
+func (r *repeatReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = r.s[r.off]
+		r.off = (r.off + 1) % len(r.s)
+	}
+	return len(p), nil
+}
+
+func bigInput(rows int) io.Reader {
+	return io.MultiReader(
+		strings.NewReader(header),
+		io.LimitReader(&repeatReader{s: row1}, int64(rows*len(row1))),
+	)
+}
+
+type cancelAfterReads struct {
+	r      io.Reader
+	n      int
+	cancel context.CancelFunc
+}
+
+func (c *cancelAfterReads) Read(p []byte) (int, error) {
+	c.n--
+	if c.n == 0 {
+		c.cancel()
+	}
+	return c.r.Read(p)
+}
+
+func assertNoLeakedGoroutines(t *testing.T, before int) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before {
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutines leaked: %d running, %d before the call", runtime.NumGoroutine(), before)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestConcurrentWithCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	h := newHistogram(t)
+
+	_, err := Concurrent(ctx, bytes.NewReader(readSample(t)), h, Options{Workers: 4, BatchSize: 3})
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Concurrent() error = %v, want context.Canceled", err)
+	}
+	assertSameHistogram(t, h, newHistogram(t))
+}
+
+func TestConcurrentCancelledMidRun(t *testing.T) {
+	const rows = 200_000
+
+	for _, workers := range []int{1, 4} {
+		for _, batchSize := range []int{1, 100} {
+			t.Run(fmt.Sprintf("workers=%d/batch=%d", workers, batchSize), func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				in := &cancelAfterReads{r: bigInput(rows), n: 50, cancel: cancel}
+				h := newHistogram(t)
+				before := runtime.NumGoroutine()
+
+				stats, err := Concurrent(ctx, in, h, Options{Workers: workers, BatchSize: batchSize})
+
+				if !errors.Is(err, context.Canceled) {
+					t.Errorf("Concurrent() error = %v, want context.Canceled", err)
+				}
+				assertSameHistogram(t, h, newHistogram(t))
+				if done := stats.Processed + stats.Skipped; done >= rows {
+					t.Errorf("the run was not interrupted: %d of %d rows were processed", done, rows)
+				}
+				assertNoLeakedGoroutines(t, before)
 			})
 		}
 	}

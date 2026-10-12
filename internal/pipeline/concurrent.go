@@ -79,10 +79,12 @@ func Concurrent(ctx context.Context, r io.Reader, h *histogram.Histogram, opts O
 		}()
 	}
 
+	cancelled := ctx.Err() != nil
+
 	var readerSkipped uint64
 	var readErr error
 	batch := make([]ingest.Record, 0, opts.BatchSize)
-	for {
+	for !cancelled {
 		rec, err := rd.ReadRecord()
 		if errors.Is(err, io.EOF) {
 			break
@@ -100,9 +102,10 @@ func Concurrent(ctx context.Context, r io.Reader, h *histogram.Histogram, opts O
 		if len(batch) == opts.BatchSize {
 			batches <- batch
 			batch = make([]ingest.Record, 0, opts.BatchSize)
+			cancelled = ctx.Err() != nil
 		}
 	}
-	if readErr == nil && len(batch) > 0 {
+	if readErr == nil && !cancelled && len(batch) > 0 {
 		batches <- batch
 	}
 	close(batches)
@@ -115,6 +118,9 @@ func Concurrent(ctx context.Context, r io.Reader, h *histogram.Histogram, opts O
 	}
 	if readErr != nil {
 		return total, readErr
+	}
+	if err := ctx.Err(); err != nil {
+		return total, err
 	}
 
 	for _, res := range results {
