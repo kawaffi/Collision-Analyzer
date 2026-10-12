@@ -19,12 +19,12 @@ import (
 	"github.com/kawaffi/collision-analyzer/internal/ingest"
 )
 
-func readSample(t *testing.T) []byte {
-	t.Helper()
+func readSample(tb testing.TB) []byte {
+	tb.Helper()
 
 	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "sample.csv"))
 	if err != nil {
-		t.Fatalf("reading sample file: %v", err)
+		tb.Fatalf("reading sample file: %v", err)
 	}
 	return data
 }
@@ -255,11 +255,13 @@ type repeatReader struct {
 }
 
 func (r *repeatReader) Read(p []byte) (int, error) {
-	for i := range p {
-		p[i] = r.s[r.off]
-		r.off = (r.off + 1) % len(r.s)
+	n := 0
+	for n < len(p) {
+		c := copy(p[n:], r.s[r.off:])
+		n += c
+		r.off = (r.off + c) % len(r.s)
 	}
-	return len(p), nil
+	return n, nil
 }
 
 func bigInput(rows int) io.Reader {
