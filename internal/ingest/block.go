@@ -110,15 +110,15 @@ func (p Parser) ParseBlock(b Block, yield func(Event)) (skipped int, firstErr er
 
 	for {
 		fields, err := cr.Read()
-		if errors.Is(err, io.EOF) {
-			return skipped, firstErr
-		}
-		var parseErr *csv.ParseError
-		if errors.As(err, &parseErr) {
-			skip(fmt.Errorf("%w: line %d: %v", ErrMalformedRow, b.FirstLine+parseErr.StartLine-1, parseErr.Err))
-			continue
-		}
-		if err != nil { // cannot happen: a bytes.Reader does not fail
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return skipped, firstErr
+			}
+			var parseErr *csv.ParseError
+			if errors.As(err, &parseErr) {
+				skip(fmt.Errorf("%w: line %d: %v", ErrMalformedRow, b.FirstLine+parseErr.StartLine-1, parseErr.Err))
+				continue
+			}
 			skip(fmt.Errorf("%w: %v", ErrMalformedRow, err))
 			return skipped, firstErr
 		}
