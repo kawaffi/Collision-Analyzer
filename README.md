@@ -1,5 +1,7 @@
 # Concurrent Collision Analyzer
 
+[![CI](https://github.com/kawaffi/Collision-Analyzer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kawaffi/Collision-Analyzer/actions/workflows/ci.yml)
+
 A Go tool that computes the invariant-mass histogram of muon pairs from CERN
 Open Data (CMS dimuon events). It has a sequential pipeline and a concurrent
 one (batches, worker pool, per-worker histograms) which are tested against each
