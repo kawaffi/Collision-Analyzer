@@ -6,10 +6,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/iotest"
-	"slices"
 
 	"github.com/kawaffi/collision-analyzer/internal/physics"
 )
