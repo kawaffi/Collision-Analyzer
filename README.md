@@ -11,7 +11,7 @@ other and benchmarked.
 - [x] Concurrent pipeline with context cancellation, tested against the
       sequential one on random input under the race detector
 - [x] Benchmarks (see Results)
-- [ ] Remove the single-reader bottleneck found by the benchmarks
+- [x] Remove the single-reader bottleneck found by the benchmarks
 - [ ] HTTP API, web UI, Docker
 
 ## Data
@@ -41,39 +41,42 @@ The computed spectrum shows the J/ψ near 3.1 GeV, the ψ(2S) near 3.7 GeV, the
 
 Benchmark on one million rows (the 20 sample rows repeated, generated on the
 fly), 10 runs each, Intel Core i5-9600K (6 cores, 6 threads), Linux (WSL2),
-Go 1.26.0:
+Go <go version>. Time per run and speedup over the sequential pipeline:
 
-| Pipeline             | Time    | Throughput     | Speedup |
-|----------------------|---------|----------------|---------|
-| sequential           | 947 ms  | 1.06M events/s | 1.00x   |
-| concurrent, 1 worker | 672 ms  | 1.49M events/s | 1.41x   |
-| concurrent, 2        | 677 ms  | 1.48M events/s | 1.40x   |
-| concurrent, 4        | 680 ms  | 1.47M events/s | 1.39x   |
-| concurrent, 6        | 672 ms  | 1.49M events/s | 1.41x   |
-| concurrent, 8        | 672 ms  | 1.49M events/s | 1.41x   |
+| Pipeline             | Time   | Throughput     | Speedup |
+|----------------------|--------|----------------|---------|
+| sequential           | 934 ms | 1.07M events/s | 1.00x   |
+| concurrent, 1 worker | 997 ms | 1.00M events/s | 0.94x   |
+| concurrent, 2        | 531 ms | 1.88M events/s | 1.76x   |
+| concurrent, 4        | 285 ms | 3.51M events/s | 3.28x   |
+| concurrent, 6        | 221 ms | 4.53M events/s | 4.23x   |
+| concurrent, 8        | 216 ms | 4.63M events/s | 4.33x   |
 
-Throughput does not grow with the number of workers: the single goroutine
-that reads the file is the bottleneck. A CPU profile of the 6-worker run
-confirms it: that goroutine spends about 98% of its time inside `encoding/csv`
-(splitting each row into fields and allocating them) and is busy for the whole
-run, while the process keeps only about 1.9 of 6 cores busy on average. The
-workers, which parse the numbers and fill the histograms, account for less
-than a third of the CPU time.
+### How the first version was improved
 
-With one worker, reading and processing already overlap as a two-stage
-pipeline (1.41x). The timings put reading at about 70% of the sequential time,
-and Amdahl's law then caps the speedup at 1/0.7 ≈ 1.4x, which is what is
-measured.
+The first concurrent version read rows with `encoding/csv` in a single
+goroutine and sent the records to the workers. Its throughput was flat at about
+1.5M events/s (1.41x) from 1 to 8 workers. A CPU profile showed why: that
+goroutine spent 98% of its time inside `encoding/csv` and was busy for the
+whole run, while the process kept only about 1.9 of 6 cores busy on average.
 
-The concurrent version also allocates about 7% more memory (one 32-byte record
-per row held in batches). Both versions make two allocations per row, which
-come from `encoding/csv`.
+The fix was to make the reader only find line ends (`ingest.BlockReader`, which
+is cheap) and to let each worker split its block into fields. Throughput at 8
+workers went from 1.50M to 4.63M events/s, 3.1x higher than the first
+concurrent version.
 
-Next step: let the reader only find line boundaries and move the field
-splitting to the workers.
+### What the numbers also show
 
-The benchmark input repeats the same 20 rows, so it measures processing
-throughput, not physics.
+- With one worker the pipeline is about 7% slower than the sequential one:
+  there is nothing left to overlap, and the block copy and the per-block
+  `encoding/csv` reader are pure overhead.
+- Going from 6 to 8 workers gains 2%, as expected on a 6-thread CPU. At 6
+  workers the efficiency is about 70%; the cause has not been measured yet
+  (garbage collection and lower clock under full load are candidates).
+- Memory: +33% bytes and +50% allocations per run compared to the sequential
+  version (the lines are copied into blocks).
+- The benchmark input repeats the same 20 rows, so it measures processing
+  throughput, not physics.
 
 ## Design notes
 
@@ -96,3 +99,6 @@ throughput, not physics.
   100,000 events); it is only a safety net.
 - `Processed` counts events added to the histogram (including under/overflow);
   `Skipped` counts rows that could not be parsed.
+  - The reader only finds line ends, so the input must have one record per line
+  (no quoted field may contain a newline), as the CMS dimuon files do.
+  `BatchSize` counts lines of input.
