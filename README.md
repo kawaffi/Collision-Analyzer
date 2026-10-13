@@ -11,7 +11,7 @@ other and benchmarked.
 - [x] Concurrent pipeline with context cancellation, tested against the
       sequential one on random input under the race detector
 - [x] Benchmarks (see Results)
-- [x] Remove the single-reader bottleneck found by the benchmarks
+- [x] Remove the single-reader and allocations bottlenecks found by the benchmarks
 - [ ] HTTP API, web UI, Docker
 
 ## Data
@@ -41,42 +41,44 @@ The computed spectrum shows the J/ψ near 3.1 GeV, the ψ(2S) near 3.7 GeV, the
 
 Benchmark on one million rows (the 20 sample rows repeated, generated on the
 fly), 10 runs each, Intel Core i5-9600K (6 cores, 6 threads), Linux (WSL2),
-Go <go version>. Time per run and speedup over the sequential pipeline:
+Go 1.26.0.
 
-| Pipeline             | Time   | Throughput     | Speedup |
-|----------------------|--------|----------------|---------|
-| sequential           | 934 ms | 1.07M events/s | 1.00x   |
-| concurrent, 1 worker | 997 ms | 1.00M events/s | 0.94x   |
-| concurrent, 2        | 531 ms | 1.88M events/s | 1.76x   |
-| concurrent, 4        | 285 ms | 3.51M events/s | 3.28x   |
-| concurrent, 6        | 221 ms | 4.53M events/s | 4.23x   |
-| concurrent, 8        | 216 ms | 4.63M events/s | 4.33x   |
+| Pipeline             | Time   | Throughput     | Speedup vs sequential | Scaling vs 1 worker |
+|----------------------|--------|----------------|-----------------------|---------------------|
+| sequential           | 947 ms | 1.06M events/s | 1.00x                 |                     |
+| concurrent, 1 worker | 845 ms | 1.18M events/s | 1.12x                 | 1.00x               |
+| concurrent, 2        | 437 ms | 2.29M events/s | 2.17x                 | 1.93x               |
+| concurrent, 4        | 227 ms | 4.40M events/s | 4.16x                 | 3.71x               |
+| concurrent, 6        | 178 ms | 5.62M events/s | 5.32x                 | 4.74x               |
+| concurrent, 8        | 175 ms | 5.70M events/s | 5.40x                 | 4.81x               |
 
-### How the first version was improved
+The speedup over the sequential pipeline combines two effects: the concurrent
+pipeline does less work per row (one allocation instead of two, which is why a
+single worker is already 1.12x faster), and parallelism. The last column
+isolates parallelism: 93% efficiency at 4 workers, 79% at 6. Going from 6 to 8
+workers gains 1.5%, as expected on a 6-thread CPU. The cause of the remaining
+inefficiency has not been measured.
 
-The first concurrent version read rows with `encoding/csv` in a single
-goroutine and sent the records to the workers. Its throughput was flat at about
-1.5M events/s (1.41x) from 1 to 8 workers. A CPU profile showed why: that
-goroutine spent 98% of its time inside `encoding/csv` and was busy for the
-whole run, while the process kept only about 1.9 of 6 cores busy on average.
+### How the pipeline was improved
 
-The fix was to make the reader only find line ends (`ingest.BlockReader`, which
-is cheap) and to let each worker split its block into fields. Throughput at 8
-workers went from 1.50M to 4.63M events/s, 3.1x higher than the first
-concurrent version.
+1. **First version.** One goroutine read rows with `encoding/csv` and sent
+   records to the workers. Throughput was flat at about 1.5M events/s from 1 to
+   8 workers. A CPU profile showed that goroutine spending 98% of its time in
+   `encoding/csv`, while the process kept only 1.9 of 6 cores busy.
+2. **Field splitting moved to the workers.** The reader now only finds line
+   ends (`ingest.BlockReader`) and each worker splits its block into fields:
+   4.63M events/s at 8 workers.
+3. **Allocations.** A memory profile showed 3 allocations per row: two inside
+   `encoding/csv` and one of my own, caused by `errors.As` moving its target to
+   the heap on every row. Fixing it and reusing the slice of fields (safe,
+   because each block is parsed entirely inside one worker) cut allocations by
+   67% and memory by 55%, and raised throughput by another 23%: 5.70M events/s
+   at 8 workers, 3.8x the first concurrent version.
 
-### What the numbers also show
-
-- With one worker the pipeline is about 7% slower than the sequential one:
-  there is nothing left to overlap, and the block copy and the per-block
-  `encoding/csv` reader are pure overhead.
-- Going from 6 to 8 workers gains 2%, as expected on a 6-thread CPU. At 6
-  workers the efficiency is about 70%; the cause has not been measured yet
-  (garbage collection and lower clock under full load are candidates).
-- Memory: +33% bytes and +50% allocations per run compared to the sequential
-  version (the lines are copied into blocks).
-- The benchmark input repeats the same 20 rows, so it measures processing
-  throughput, not physics.
+Other numbers: the concurrent pipeline allocates 1.0M objects and 276 MiB per
+million rows, against 2.0M and 464 MiB for the sequential one. Run-to-run
+variation between sessions is about 1-2%. The benchmark input repeats the same
+20 rows, so it measures processing throughput, not physics.
 
 ## Design notes
 
@@ -102,3 +104,5 @@ concurrent version.
   - The reader only finds line ends, so the input must have one record per line
   (no quoted field may contain a newline), as the CMS dimuon files do.
   `BatchSize` counts lines of input.
+  - Each block is parsed inside a single worker with its own `csv.Reader` and
+  `ReuseRecord` enabled, so `Parse` must not keep the fields of a record.
