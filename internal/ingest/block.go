@@ -100,6 +100,7 @@ func (r *BlockReader) ReadBlock() (Block, error) {
 func (p Parser) ParseBlock(b Block, yield func(Event)) (skipped int, firstErr error) {
 	cr := csv.NewReader(bytes.NewReader(b.Data))
 	cr.FieldsPerRecord = -1
+	cr.ReuseRecord = true
 
 	skip := func(err error) {
 		skipped++

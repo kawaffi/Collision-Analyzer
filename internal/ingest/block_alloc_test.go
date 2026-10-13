@@ -42,3 +42,17 @@ func TestParseBlockDoesNotAllocateBeyondCSV(t *testing.T) {
 			got, allocRows, base, (got-base)/allocRows)
 	}
 }
+
+func TestParseBlockReusesTheFieldSlice(t *testing.T) {
+	p := newTestParser(t)
+	data := []byte(strings.Repeat(row, allocRows))
+
+	base := csvAllocs(data)
+	got := parseBlockAllocs(p, Block{FirstLine: 2, Data: data})
+
+	// Reusing the slice of fields saves one allocation per row.
+	if want := base - allocRows + allocSlack; got > want {
+		t.Errorf("ParseBlock makes %.0f allocations for %d rows, want at most %.0f: it should save one per row against encoding/csv (%.0f)",
+			got, allocRows, want, base)
+	}
+}
