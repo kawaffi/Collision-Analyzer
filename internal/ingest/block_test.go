@@ -149,3 +149,90 @@ func TestNewBlockReaderRejectsBadInput(t *testing.T) {
 		})
 	}
 }
+
+func parseAll(p Parser, b Block) (events []Event, skipped int, firstErr error) {
+	skipped, firstErr = p.ParseBlock(b, func(ev Event) { events = append(events, ev) })
+	return events, skipped, firstErr
+}
+
+func TestParseBlockYieldsEventsInOrder(t *testing.T) {
+	p := newTestParser(t)
+	second := strings.Replace(row, "19.1712", "20.1712", 1)
+	wantSecond := firstEvent
+	wantSecond.Mu1.E = 20.1712
+
+	events, skipped, err := parseAll(p, Block{FirstLine: 2, Data: []byte(row + second)})
+
+	if err != nil || skipped != 0 {
+		t.Fatalf("skipped = %d, err = %v, want 0 and nil", skipped, err)
+	}
+	if len(events) != 2 || events[0] != firstEvent || events[1] != wantSecond {
+		t.Errorf("events = %+v, want [%+v %+v]", events, firstEvent, wantSecond)
+	}
+}
+
+func TestParseBlockOfNothing(t *testing.T) {
+	p := newTestParser(t)
+
+	for _, data := range []string{"", "\n\n"} {
+		events, skipped, err := parseAll(p, Block{FirstLine: 2, Data: []byte(data)})
+		if len(events) != 0 || skipped != 0 || err != nil {
+			t.Errorf("data %q: events = %v, skipped = %d, err = %v, want nothing", data, events, skipped, err)
+		}
+	}
+}
+
+func TestParseBlockSkipsMalformedRows(t *testing.T) {
+	p := newTestParser(t)
+
+	bad := []struct{ name, row string }{
+		{"non-numeric", strings.Replace(row, "19.1712", "abc", 1)},
+		{"NaN", strings.Replace(row, "19.1712", "NaN", 1)},
+		{"infinity", strings.Replace(row, "-16.4673", "+Inf", 1)},
+		{"empty field", strings.Replace(row, "2.73205", "", 1)},
+		{"too few fields", "146436,90830792,G\n"},
+		{"too many fields", strings.TrimSuffix(row, "\n") + ",extra\n"},
+		{"bare quote", strings.Replace(row, "19.1712", `19."172`, 1)},
+	}
+
+	for _, tt := range bad {
+		positions := map[string]string{
+			"first":  tt.row + row + row,
+			"middle": row + tt.row + row,
+			"last":   row + row + tt.row,
+		}
+		for pos, data := range positions {
+			t.Run(tt.name+"/"+pos, func(t *testing.T) {
+				events, skipped, err := parseAll(p, Block{FirstLine: 2, Data: []byte(data)})
+
+				if len(events) != 2 || skipped != 1 {
+					t.Errorf("got %d events and %d skipped, want 2 and 1", len(events), skipped)
+				}
+				if !errors.Is(err, ErrMalformedRow) {
+					t.Errorf("firstErr = %v, want ErrMalformedRow", err)
+				}
+			})
+		}
+	}
+}
+
+func TestParseBlockReportsFirstBadLine(t *testing.T) {
+	p := newTestParser(t)
+	bad := strings.Replace(row, "19.1712", "abc", 1)
+	data := row + "\n" + bad + bad + row
+
+	events, skipped, err := parseAll(p, Block{FirstLine: 10, Data: []byte(data)})
+
+	if len(events) != 2 || skipped != 2 {
+		t.Errorf("got %d events and %d skipped, want 2 and 2", len(events), skipped)
+	}
+	if err == nil || !strings.Contains(err.Error(), "line 12") {
+		t.Errorf("firstErr = %v, want it to mention line 12", err)
+	}
+
+	quoteBad := strings.Replace(row, "19.1712", `19."172`, 1)
+	_, _, err = parseAll(p, Block{FirstLine: 10, Data: []byte(row + "\n" + quoteBad)})
+	if err == nil || !strings.Contains(err.Error(), "line 12") {
+		t.Errorf("bare quote: firstErr = %v, want it to mention line 12", err)
+	}
+}

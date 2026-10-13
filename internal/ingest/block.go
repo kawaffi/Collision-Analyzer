@@ -22,6 +22,10 @@ type BlockReader struct {
 	hint     int // size of the previous block, to allocate the next one
 }
 
+func (r *BlockReader) Parser() Parser {
+	return r.parser
+}
+
 func NewBlockReader(r io.Reader, linesPerBlock int) (*BlockReader, error) {
 	if linesPerBlock < 1 {
 		return nil, fmt.Errorf("ingest: lines per block must be positive, got %d", linesPerBlock)
@@ -86,4 +90,45 @@ func (r *BlockReader) ReadBlock() (Block, error) {
 	r.nextLine += lines
 	r.hint = len(data)
 	return b, nil
+}
+
+// ParseBlock parses the records in b and calls yield, in order, for every
+// valid event. Malformed rows are skipped and counted; the first one is also
+// returned as firstErr (wrapping ErrMalformedRow, with its line number in the
+// input) so that callers can show where the problem is. A Parser is immutable
+// and ParseBlock keeps no state, so it can run on several goroutines at once.
+func (p Parser) ParseBlock(b Block, yield func(Event)) (skipped int, firstErr error) {
+	cr := csv.NewReader(bytes.NewReader(b.Data))
+	cr.FieldsPerRecord = -1
+
+	skip := func(err error) {
+		skipped++
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	for {
+		fields, err := cr.Read()
+		if errors.Is(err, io.EOF) {
+			return skipped, firstErr
+		}
+		var parseErr *csv.ParseError
+		if errors.As(err, &parseErr) {
+			skip(fmt.Errorf("%w: line %d: %v", ErrMalformedRow, b.FirstLine+parseErr.StartLine-1, parseErr.Err))
+			continue
+		}
+		if err != nil { // cannot happen: a bytes.Reader does not fail
+			skip(fmt.Errorf("%w: %v", ErrMalformedRow, err))
+			return skipped, firstErr
+		}
+
+		line, _ := cr.FieldPos(0)
+		ev, err := p.Parse(Record{Line: b.FirstLine + line - 1, Fields: fields})
+		if err != nil {
+			skip(err)
+			continue
+		}
+		yield(ev)
+	}
 }
